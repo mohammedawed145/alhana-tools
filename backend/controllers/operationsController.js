@@ -8,8 +8,8 @@ const SHIPPING_FEE=Number(process.env.SHIPPING_FEE||150);
 const channels=['instapay','vodafone_cash'];
 
 export async function createOrder(req,res){
-  const {items,customerName,phone,email,governorate,shippingAddress,notes,paymentMethod,shippingFeePaymentMethod,paymentReference}=req.body;
-  if(!Array.isArray(items)||!items.length||!customerName||!phone||!shippingAddress||!['cash_on_delivery','instapay','vodafone_cash'].includes(paymentMethod)||!channels.includes(shippingFeePaymentMethod))return fail(res,'بيانات الطلب أو طريقة الدفع غير مكتملة',422);
+  const {items,customerName,phone,email,governorate,shippingAddress,notes,paymentMethod,shippingFeePaymentMethod,paymentReference,shippingMethod='post_office_pickup'}=req.body;
+  if(!Array.isArray(items)||!items.length||!customerName||!phone||!shippingAddress||!['cash_on_delivery','instapay','vodafone_cash'].includes(paymentMethod)||!channels.includes(shippingFeePaymentMethod)||shippingMethod!=='post_office_pickup')return fail(res,'بيانات الطلب أو طريقة الدفع غير مكتملة',422);
   if(paymentMethod!=='cash_on_delivery'&&paymentMethod!==shippingFeePaymentMethod)return fail(res,'طريقة الدفع الكاملة يجب أن تطابق قناة دفع رسوم الشحن',422);
 
   const session=await mongoose.startSession();
@@ -34,7 +34,7 @@ export async function createOrder(req,res){
         const reserved=await Product.findOneAndUpdate({_id:item.product,stock:{$gte:item.quantity}},{$inc:{stock:-item.quantity}},{new:true,session});
         if(!reserved)throw Object.assign(new Error('تعذر حجز الكمية، حاول مرة أخرى'),{statusCode:409});
       }
-      [order]=await Order.create([{user:req.user?._id,items:normalized,subtotal,shippingFee:SHIPPING_FEE,totalPrice,amountDueOnDelivery,customerName,phone,email,governorate,shippingAddress,notes,paymentMethod,shippingFeePaymentMethod,shippingFeePaid:false,paymentStatus:'pending_verification',paymentReference,status:'awaiting_shipping_fee'}],{session});
+      [order]=await Order.create([{user:req.user?._id,items:normalized,subtotal,shippingFee:SHIPPING_FEE,shippingMethod,totalPrice,amountDueOnDelivery,customerName,phone,email,governorate,shippingAddress,notes,paymentMethod,shippingFeePaymentMethod,shippingFeePaid:false,paymentStatus:'pending_verification',paymentReference,status:'awaiting_shipping_fee'}],{session});
     });
   }catch(error){
     return fail(res,error.statusCode?error.message:'تعذر إنشاء الطلب، حاول مرة أخرى',error.statusCode||500);
