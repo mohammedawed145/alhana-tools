@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: alhana-tools-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLIENT_URL
+        sync: false
+      - key: INSTAPAY_ADDRESS
+        sync: false
+      - key: VODAFONE_CASH_NUMBER
+        sync: false
+      - key: SHIPPING_FEE
+        value: "150"
