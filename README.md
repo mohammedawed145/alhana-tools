@@ -26,6 +26,7 @@ npm.cmd run dev
 وفي نافذة أخرى من مجلد المشروع:
 
 ```bash
+cd ../frontend
 npm.cmd install
 npm.cmd run dev
 ```
