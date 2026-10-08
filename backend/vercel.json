@@ -1,9 +1,11 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/index.js", "use": "@vercel/node" }
+    { "src": "api/index.js", "use": "@vercel/node" },
+    { "src": "api/admin-seed.js", "use": "@vercel/node" }
   ],
   "routes": [
+    { "src": "/admin-seed", "dest": "/api/admin-seed.js" },
     { "src": "/(.*)", "dest": "/api/index.js" }
   ]
 }
