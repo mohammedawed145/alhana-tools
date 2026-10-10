@@ -21,6 +21,7 @@ app.use(express.urlencoded({extended:true,limit:'1mb'}));
 app.use('/uploads/products',express.static(path.join(__dirname,'uploads/products')));
 app.get('/health',(_req,res)=>res.json({success:true,message:'مؤسسة الهنا لتجارة العدد وارد الامارات API is healthy',timestamp:new Date().toISOString()}));
 app.use('/api',routes);
+app.use('/',routes);
 app.use((_req,res)=>fail(res,'Route not found',404));
 app.use(errorHandler);
 export default app;
