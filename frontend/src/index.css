@@ -62,3 +62,17 @@ html{scroll-behavior:smooth}body{background:var(--cream);color:var(--ink);line-h
 .social-facebook{font:700 23px Arial;color:#fff;line-height:1}
 .contact-info .location-link{color:#fff;text-decoration:underline;text-decoration-color:var(--orange);text-underline-offset:4px;font-size:13px}
 .footer-grid>div:not(.footer-brand) a[href^="tel:"],.footer-grid>div:not(.footer-brand) a[href^="https://wa.me"],.footer-grid>div:not(.footer-brand) a[href^="https://www.facebook"],.footer-grid>div:not(.footer-brand) a[href^="https://maps"]{display:flex;align-items:center;gap:7px}
+.product-card{border:1px solid #e6ebe6;border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 8px 24px rgba(24,33,29,.055)}
+.product-card:hover{transform:translateY(-6px);box-shadow:0 18px 38px rgba(24,33,29,.13)}
+.product-image{height:250px;background:linear-gradient(145deg,#f8faf7,#edf2ed);}
+.product-image img{padding:0!important;transform:scale(1.32);transition:transform .35s ease;}
+.product-card:hover .product-image img{transform:scale(1.42)}
+.product-image .tag{right:14px;top:14px;border-radius:999px;padding:7px 12px;font-weight:700;box-shadow:0 5px 12px rgba(233,104,50,.2)}
+.product-info{padding:18px 17px 16px}
+.product-info h3{font-size:16px;line-height:1.5;min-height:48px;margin:9px 0 2px}
+.product-bottom{margin-top:16px;padding-top:13px;border-top:1px solid #edf0ec}
+.product-bottom strong{font-size:18px;color:var(--ink)}
+.add{width:40px;height:40px;border-radius:12px}
+.detail-image{border-radius:22px;background:linear-gradient(145deg,#f8faf7,#edf2ed);box-shadow:0 12px 34px rgba(24,33,29,.08)}
+.detail-image img{transform:scale(1.16);transition:transform .35s ease}
+.detail-image:hover img{transform:scale(1.23)}
