@@ -1,7 +1,6 @@
 import app from '../server.js';
 import connectDB from '../config/db.js';
 import {Category} from '../models/catalog.js';
-
 const defaultCategories=[
   {name:'أدوات اللحام',slug:'welding'},
   {name:'القطع والجلي',slug:'cutting-grinding'},
@@ -12,15 +11,13 @@ const defaultCategories=[
   {name:'العدد الكهربائية',slug:'power-tools'},
   {name:'معدات الورش',slug:'workshop'}
 ];
-
 async function ensureDefaultCategories(){
   await Promise.all(defaultCategories.map(category=>Category.findOneAndUpdate(
     {slug:category.slug},
-    {$set:{name:category.name,isActive:true},$setOnInsert:category},
-    {upsert:true,new:true,setDefaultsOnInsert:true}
+    {$set:{name:category.name,slug:category.slug,isActive:true}},
+    {upsert:true,new:true}
   )));
 }
-
 export default async function handler(req,res){
   await connectDB();
   await ensureDefaultCategories();
