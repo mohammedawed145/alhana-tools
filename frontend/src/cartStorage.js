@@ -1,19 +1,22 @@
 const STORAGE_KEY='oddatak-cart';
 const MAX_INLINE_IMAGE_CHARS=120000;
+const numberOr=(value,fallback=0)=>{const number=Number(value);return Number.isFinite(number)?number:fallback};
 
 export function compactCartProduct(product={}){
-  const candidate=product.thumbnail||product.images?.[0]||product.image||'';
-  const image=typeof candidate==='string'&&(!candidate.startsWith('data:')||candidate.length<=MAX_INLINE_IMAGE_CHARS)?candidate:'';
+  const candidates=[product.thumbnail,product.images?.[0],product.image];
+  const image=candidates.find(value=>typeof value==='string'&&value&&(!value.startsWith('data:')||value.length<=MAX_INLINE_IMAGE_CHARS))||'';
+  const rawQuantity=numberOr(product.q??product.quantity,1);
+  const discountPrice=product.discountPrice==null?null:Math.max(0,numberOr(product.discountPrice,numberOr(product.price,0)));
   return {
     _id:String(product._id||product.product||''),
     name:String(product.name||''),
     brand:String(product.brand||''),
     model:String(product.model||''),
-    price:Number(product.price||0),
-    discountPrice:product.discountPrice==null?null:Number(product.discountPrice),
-    stock:Number(product.stock||0),
+    price:Math.max(0,numberOr(product.price,0)),
+    discountPrice,
+    stock:Math.max(0,numberOr(product.stock,0)),
     image,
-    q:Math.max(1,Number(product.q||product.quantity||1))
+    q:Math.max(1,Math.floor(rawQuantity))
   };
 }
 
