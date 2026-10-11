@@ -1,5 +1,5 @@
 import {Router} from 'express';
-import {register,login,me} from '../controllers/authController.js';
+import {register,login,changePassword,me} from '../controllers/authController.js';
 import * as c from '../controllers/catalogController.js';
 import * as o from '../controllers/operationsController.js';
 import {protect,admin,upload,receiptUpload} from '../middleware/core.js';
@@ -8,13 +8,14 @@ const r=Router();
 const guarded=[protect,admin];
 
 r.post('/auth/login',login);
+r.put('/auth/change-password',protect,admin,changePassword);
 r.post('/auth/register',register);
 r.get('/auth/me',protect,me);
 
 r.get('/products',c.listProducts);
 r.get('/products/:id',c.getProduct);
-r.post('/products',...guarded,upload.array('images',8),c.createProduct);
-r.put('/products/:id',...guarded,upload.array('images',8),c.updateProduct);
+r.post('/products',...guarded,upload.fields([{name:'images',maxCount:8},{name:'thumbnail',maxCount:1}]),c.createProduct);
+r.put('/products/:id',...guarded,upload.fields([{name:'images',maxCount:8},{name:'thumbnail',maxCount:1}]),c.updateProduct);
 r.delete('/products/:id',...guarded,c.deleteProduct);
 
 r.get('/categories',c.listCategories);
@@ -24,6 +25,7 @@ r.put('/categories/:id',...guarded,c.updateCategory);
 r.delete('/categories/:id',...guarded,c.deleteCategory);
 
 r.post('/orders',o.createOrder);
+r.post('/orders/track',o.trackOrder);
 r.get('/orders/my-orders',protect,o.myOrders);
 r.get('/orders/:id',protect,o.getOrder);
 r.post('/orders/:id/payment-receipt',protect,receiptUpload.single('receipt'),o.uploadReceipt);
