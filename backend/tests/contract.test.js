@@ -40,6 +40,12 @@ test('product pagination and sorting are bounded and allowlisted',()=>{
   assert.match(catalog,/safePage/);
 });
 
+test('authentication routes link to an exported password-change handler',async()=>{
+  const auth=await import('../controllers/authController.js');
+  assert.equal(typeof auth.changePassword,'function');
+  await import('../routes/index.js');
+});
+
 test('public product detail does not expose inactive products',()=>{
   assert.match(catalog,/findOne\(\{_id:req\.params\.id,isActive:true\}\)/);
 });
