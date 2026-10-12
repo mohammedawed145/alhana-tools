@@ -2,7 +2,8 @@ import axios from 'axios';
 
 // Keep local development configurable, but make the deployed storefront
 // point at the separately deployed API instead of the SPA /api rewrite.
-const API_URL=import.meta.env.VITE_API_URL||'https://alhana-tools-eug1.vercel.app/api';
+const configuredApiUrl=String(import.meta.env.VITE_API_URL||'https://alhana-tools-eug1.vercel.app/api').replace(/\/+$/,'');
+const API_URL=/\/api$/i.test(configuredApiUrl)?configuredApiUrl:`${configuredApiUrl}/api`;
 export const api=axios.create({baseURL:API_URL,headers:{'Content-Type':'application/json'},timeout:10000});
 api.interceptors.request.use(config=>{const token=localStorage.getItem('oddatak-token');if(token)config.headers.Authorization=`Bearer ${token}`;if(typeof FormData!=='undefined'&&config.data instanceof FormData){delete config.headers['Content-Type'];delete config.headers['content-type']}return config});
 export const productService={list:params=>api.get('/products',{params}),categories:()=>api.get('/categories'),get:id=>api.get(`/products/${id}`),featured:()=>api.get('/products',{params:{featured:true,limit:4}}).then(r=>r.data?.data?.products?.length?r:api.get('/products',{params:{limit:4}}))};
