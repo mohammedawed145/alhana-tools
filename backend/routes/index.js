@@ -13,6 +13,7 @@ r.post('/auth/register',register);
 r.get('/auth/me',protect,me);
 
 r.get('/products',c.listProducts);
+r.get('/products/featured',c.featuredProducts);
 r.get('/products/:id',c.getProduct);
 r.post('/products',...guarded,upload.fields([{name:'images',maxCount:8},{name:'thumbnail',maxCount:1}]),c.createProduct);
 r.put('/products/:id',...guarded,upload.fields([{name:'images',maxCount:8},{name:'thumbnail',maxCount:1}]),c.updateProduct);

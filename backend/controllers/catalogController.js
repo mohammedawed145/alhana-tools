@@ -6,6 +6,8 @@ async function uniqueSlug(Model,value,excludeId){const base=slugify(value)||`ite
 const imageData=files=>files?.map(file=>file.buffer?`data:${file.mimetype};base64,${file.buffer.toString('base64')}`:`/uploads/products/${file.filename}`);
 const allowedSorts=new Set(['-createdAt','createdAt','price','-price','name','-name']);
 
+const publicProduct=record=>{const product=record.toObject();const cover=product.thumbnail||product.images?.[0];product.images=cover?[cover]:[];delete product.thumbnail;return product};
+
 export async function listProducts(req,res){
   const {page=1,limit=12,search,category,brand,minPrice,maxPrice,stock,featured,sort='-createdAt'}=req.query;
   const parsedPage=Number.parseInt(page,10);
@@ -28,8 +30,21 @@ export async function listProducts(req,res){
   if(Object.keys(priceRange).length)q.price=priceRange;
   const total=await Product.countDocuments(q);
   const records=await Product.find(q).populate('category','name slug').sort(safeSort).skip((safePage-1)*safeLimit).limit(safeLimit);
-  const products=records.map(record=>{const product=record.toObject();const cover=product.thumbnail||product.images?.[0];product.images=cover?[cover]:[];delete product.thumbnail;return product});
+  const products=records.map(publicProduct);
   return ok(res,{products,pagination:{page:safePage,limit:safeLimit,total,totalPages:Math.ceil(total/safeLimit)}});
+}
+
+export async function featuredProducts(req,res){
+  const parsedPage=Number.parseInt(req.query.page,10);
+  const parsedLimit=Number.parseInt(req.query.limit,10);
+  const page=Number.isInteger(parsedPage)&&parsedPage>0?parsedPage:1;
+  const limit=Number.isInteger(parsedLimit)&&parsedLimit>0?Math.min(parsedLimit,100):4;
+  const featuredFilter={isActive:true,featured:true};
+  const featuredTotal=await Product.countDocuments(featuredFilter);
+  const filter=featuredTotal?featuredFilter:{isActive:true};
+  const total=featuredTotal?featuredTotal:await Product.countDocuments(filter);
+  const records=await Product.find(filter).populate('category','name slug').sort('-createdAt').skip((page-1)*limit).limit(limit);
+  return ok(res,{products:records.map(publicProduct),pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}});
 }
 
 export async function getProduct(req,res){const p=await Product.findOne({_id:req.params.id,isActive:true}).populate('category');return p?ok(res,{product:p}):fail(res,'Product not found',404)}

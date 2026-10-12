@@ -40,6 +40,13 @@ test('product pagination and sorting are bounded and allowlisted',()=>{
   assert.match(catalog,/safePage/);
 });
 
+test('featured products endpoint falls back to active latest products when no featured items exist',()=>{
+  assert.match(catalog,/export async function featuredProducts/);
+  assert.match(catalog,/Product\.countDocuments\(featuredFilter\)/);
+  assert.match(catalog,/const filter=featuredTotal\?featuredFilter:\{isActive:true\}/);
+  assert.match(routes,/r\.get\('\/products\/featured',c\.featuredProducts\)/);
+});
+
 test('authentication routes link to an exported password-change handler',async()=>{
   const auth=await import('../controllers/authController.js');
   assert.equal(typeof auth.changePassword,'function');
