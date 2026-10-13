@@ -3,14 +3,21 @@ import mongoose from 'mongoose';
 import User from '../models/User.js';
 import {Order,Message,Product} from '../models/catalog.js';
 import {ok,fail} from '../middleware/core.js';
+import {sendNewOrderAlert} from '../services/whatsapp.js';
+import {calculateDepositBreakdown} from '../services/orderPayments.js';
 
-const SHIPPING_FEE=Number(process.env.SHIPPING_FEE||150);
+const legacyShippingFee=Number(process.env.SHIPPING_FEE||150);
+const configuredDeposit=Number(process.env.ORDER_DEPOSIT_AMOUNT||150);
+const ORDER_DEPOSIT_AMOUNT=Number.isFinite(configuredDeposit)&&configuredDeposit>=0?configuredDeposit:150;
 const channels=['instapay','vodafone_cash'];
 
 export async function createOrder(req,res){
-  const {items,customerName,phone,email,governorate,shippingAddress,notes,paymentMethod,shippingFeePaymentMethod,paymentReference,shippingMethod='post_office_pickup'}=req.body;
-  if(!Array.isArray(items)||!items.length||!customerName||!phone||!shippingAddress||!['cash_on_delivery','instapay','vodafone_cash'].includes(paymentMethod)||!channels.includes(shippingFeePaymentMethod)||shippingMethod!=='post_office_pickup')return fail(res,'بيانات الطلب أو طريقة الدفع غير مكتملة',422);
-  if(paymentMethod!=='cash_on_delivery'&&paymentMethod!==shippingFeePaymentMethod)return fail(res,'طريقة الدفع الكاملة يجب أن تطابق قناة دفع رسوم الشحن',422);
+  const {items,customerName,phone,email,governorate,shippingAddress,notes,paymentMethod,depositPaymentMethod,shippingFeePaymentMethod,paymentReference,shippingMethod='post_office_pickup'}=req.body;
+  const isDepositFlow=depositPaymentMethod!==undefined;
+  const upfrontChannel=depositPaymentMethod||shippingFeePaymentMethod||(paymentMethod!=='cash_on_delivery'?paymentMethod:null);
+  if(!Array.isArray(items)||!items.length||!customerName||!phone||!shippingAddress||!['cash_on_delivery','instapay','vodafone_cash'].includes(paymentMethod)||!channels.includes(upfrontChannel)||shippingMethod!=='post_office_pickup')return fail(res,'بيانات الطلب أو طريقة الدفع غير مكتملة',422);
+  if(isDepositFlow&&(paymentMethod!=='cash_on_delivery'||req.body.contactConsent!==true))return fail(res,'يلزم اختيار دفع باقي قيمة المنتجات عند الاستلام والموافقة على التواصل لتأكيد الطلب',422);
+  if(!isDepositFlow&&paymentMethod!=='cash_on_delivery'&&paymentMethod!==upfrontChannel)return fail(res,'طريقة الدفع الكاملة يجب أن تطابق قناة الدفع',422);
 
   const session=await mongoose.startSession();
   let order;
@@ -28,28 +35,107 @@ export async function createOrder(req,res){
         normalized.push({product:p._id,name:p.name,price,quantity,image:p.images?.[0]});
       }
       const subtotal=normalized.reduce((s,i)=>s+i.price*i.quantity,0);
-      const totalPrice=subtotal+SHIPPING_FEE;
-      const amountDueOnDelivery=paymentMethod==='cash_on_delivery'?subtotal:0;
+      if(isDepositFlow&&subtotal<=0)throw Object.assign(new Error('قيمة المنتجات غير صالحة للدفعة المقدمة'),{statusCode:422});
+      const depositBreakdown=isDepositFlow?calculateDepositBreakdown(subtotal,ORDER_DEPOSIT_AMOUNT):null;
+      const depositAmount=depositBreakdown?.depositAmount;
+      const shippingFee=depositBreakdown?.shippingFee??legacyShippingFee;
+      const totalPrice=depositBreakdown?.totalPrice??subtotal+shippingFee;
+      const amountDueOnDelivery=depositBreakdown?.amountDueOnDelivery??(paymentMethod==='cash_on_delivery'?subtotal:0);
       for(const item of normalized){
         const reserved=await Product.findOneAndUpdate({_id:item.product,stock:{$gte:item.quantity}},{$inc:{stock:-item.quantity}},{new:true,session});
         if(!reserved)throw Object.assign(new Error('تعذر حجز الكمية، حاول مرة أخرى'),{statusCode:409});
       }
-      [order]=await Order.create([{user:req.user?._id,items:normalized,subtotal,shippingFee:SHIPPING_FEE,shippingMethod,totalPrice,amountDueOnDelivery,customerName,phone,email,governorate,shippingAddress,notes,paymentMethod,shippingFeePaymentMethod,shippingFeePaid:false,paymentStatus:'pending_verification',paymentReference,status:'awaiting_shipping_fee'}],{session});
+      const orderData={user:req.user?._id,items:normalized,subtotal,shippingFee,shippingMethod,totalPrice,amountDueOnDelivery,customerName,phone,email,governorate,shippingAddress,notes,paymentMethod,shippingFeePaid:false,paymentStatus:'pending_verification',paymentReference,status:isDepositFlow?'awaiting_deposit':'awaiting_shipping_fee'};
+      if(isDepositFlow){
+        orderData.depositAmount=depositAmount;
+        orderData.depositPaymentMethod=upfrontChannel;
+        orderData.depositPaid=false;
+        orderData.contactConsent=true;
+        orderData.contactConsentAt=new Date();
+      }else{
+        orderData.shippingFeePaymentMethod=upfrontChannel;
+      }
+      [order]=await Order.create([orderData],{session});
     });
   }catch(error){
     return fail(res,error.statusCode?error.message:'تعذر إنشاء الطلب، حاول مرة أخرى',error.statusCode||500);
   }finally{await session.endSession();}
-  return ok(res,{order,paymentInstructions:{shippingFee:SHIPPING_FEE,instapayAddress:process.env.INSTAPAY_ADDRESS||'',vodafoneCashNumber:process.env.VODAFONE_CASH_NUMBER||'',amountDueOnDelivery:order.amountDueOnDelivery}},'تم تسجيل الطلب، أرسل رسوم الشحن وانتظر التأكيد',201);
+
+  let whatsappNotification={status:'not_configured'};
+  if(isDepositFlow){
+    whatsappNotification=await sendNewOrderAlert(order);
+    if(whatsappNotification.status!=='not_configured'){
+      try{
+        const update={$set:{whatsappNotificationStatus:whatsappNotification.status}};
+        if(whatsappNotification.status==='sent')update.$set.whatsappNotificationSentAt=new Date();
+        await Order.updateOne({_id:order._id},update);
+        order.whatsappNotificationStatus=whatsappNotification.status;
+        if(whatsappNotification.status==='sent')order.whatsappNotificationSentAt=update.$set.whatsappNotificationSentAt;
+      }catch{
+        // The order remains valid even if the notification status cannot be persisted.
+      }
+    }
+  }
+  const paymentInstructions=isDepositFlow
+    ?{depositAmount:order.depositAmount,remainingProductAmount:order.amountDueOnDelivery,shippingPaidAtPostOffice:true,instapayAddress:process.env.INSTAPAY_ADDRESS||'',vodafoneCashNumber:process.env.VODAFONE_CASH_NUMBER||''}
+    :{shippingFee:legacyShippingFee,instapayAddress:process.env.INSTAPAY_ADDRESS||'',vodafoneCashNumber:process.env.VODAFONE_CASH_NUMBER||'',amountDueOnDelivery:order.amountDueOnDelivery};
+  return ok(res,{order,paymentInstructions,whatsappNotification:{status:whatsappNotification.status}},isDepositFlow?'تم تسجيل الطلب. حوّل الدفعة المقدمة وانتظر تأكيدها':'تم تسجيل الطلب، أرسل رسوم الشحن وانتظر التأكيد',201);
 }
+
 
 export async function uploadReceipt(req,res){const order=await Order.findById(req.params.id);if(!order)return fail(res,'Order not found',404);if(req.user?.role!=='admin'&&(!order.user||!order.user.equals(req.user._id)))return fail(res,'Forbidden',403);if(!req.file)return fail(res,'Payment receipt file is required',422);order.paymentReceipt=`/uploads/receipts/${req.file.filename}`;order.paymentStatus='pending_verification';await order.save();return ok(res,{order,paymentReceipt:order.paymentReceipt},'Receipt uploaded')}
 export async function myOrders(req,res){return ok(res,{orders:await Order.find({user:req.user._id}).sort('-createdAt')})}
 export async function getOrder(req,res){const o=await Order.findById(req.params.id).populate('user','name email phone');if(!o)return fail(res,'Order not found',404);if(req.user?.role!=='admin'&&o.user&&(!o.user._id.equals(req.user._id)))return fail(res,'Forbidden',403);return ok(res,{order:o})}
 const normalizePhone=value=>{const digits=String(value||'').replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g,d=>'۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/\D/g,'');return digits.startsWith('20')&&digits.length>=12?`0${digits.slice(2)}`:digits};
-export async function trackOrder(req,res){const {orderId,phone}=req.body||{};if(!mongoose.isValidObjectId(orderId)||!phone)return fail(res,'لم يتم العثور على طلب مطابق',404);const order=await Order.findById(orderId).select('phone status paymentStatus shipment createdAt');if(!order||normalizePhone(order.phone)!==normalizePhone(phone))return fail(res,'لم يتم العثور على طلب مطابق',404);return ok(res,{order:{id:String(order._id),status:order.status,paymentStatus:order.paymentStatus,shipment:order.shipment,createdAt:order.createdAt}})}
+export async function trackOrder(req,res){
+  const {orderId,phone}=req.body||{};
+  if(!mongoose.isValidObjectId(orderId)||!phone)return fail(res,'لم يتم العثور على طلب مطابق',404);
+  const order=await Order.findById(orderId).select('phone status paymentStatus shipment createdAt depositAmount');
+  if(!order||normalizePhone(order.phone)!==normalizePhone(phone))return fail(res,'لم يتم العثور على طلب مطابق',404);
+  const depositFlow=order.depositAmount!==undefined&&order.depositAmount!==null;
+  return ok(res,{order:{id:String(order._id),status:order.status,paymentStatus:order.paymentStatus,depositFlow,shipment:order.shipment,createdAt:order.createdAt}});
+}
 export async function adminOrders(req,res){return ok(res,{orders:await Order.find().populate('user','name email').sort('-createdAt')})}
-export async function updateOrderStatus(req,res){const allowed=['awaiting_shipping_fee','pending','confirmed','processing','shipped','delivered','cancelled'];const next=req.body.status;if(!allowed.includes(next))return fail(res,'Invalid order status',422);const order=await Order.findById(req.params.id);if(!order)return fail(res,'Order not found',404);if(['processing','shipped','delivered'].includes(next)&&!order.shippingFeePaid)return fail(res,'Confirm shipping fee payment before fulfillment',409);if(next==='shipped'&&!order.shipment?.trackingNumber)return fail(res,'Add a tracking number before shipping',422);if(next==='delivered'&&order.status!=='shipped')return fail(res,'Order must be shipped before delivery',422);order.status=next;if(next==='shipped')order.shipment.shippedAt=new Date();if(next==='delivered')order.shipment.deliveredAt=new Date();await order.save();return ok(res,{order})}
-export async function updatePaymentStatus(req,res){const {shippingFeePaid,paymentStatus}=req.body;const allowed=['pending_verification','shipping_fee_paid','paid','cod_due'];if(!allowed.includes(paymentStatus))return fail(res,'Invalid payment status',422);const patch={paymentStatus,shippingFeePaid:Boolean(shippingFeePaid)};if(paymentStatus==='shipping_fee_paid')patch.status='pending';if(paymentStatus==='paid')patch.status='confirmed';const order=await Order.findByIdAndUpdate(req.params.id,patch,{new:true,runValidators:true});return order?ok(res,{order},'Payment status updated'):fail(res,'Order not found',404)}
+export async function updateOrderStatus(req,res){
+  const allowed=['awaiting_shipping_fee','awaiting_deposit','pending','confirmed','processing','shipped','delivered','cancelled'];
+  const next=req.body.status;
+  if(!allowed.includes(next))return fail(res,'Invalid order status',422);
+  const order=await Order.findById(req.params.id);
+  if(!order)return fail(res,'Order not found',404);
+  const upfrontPaymentConfirmed=order.depositAmount!==undefined&&order.depositAmount!==null?Boolean(order.depositPaid):Boolean(order.shippingFeePaid);
+  if(next==='confirmed'&&order.depositAmount!==undefined&&order.depositAmount!==null&&!order.depositPaid)return fail(res,'Confirm the upfront deposit before confirming the order',409);
+  if(['processing','shipped','delivered'].includes(next)&&!upfrontPaymentConfirmed)return fail(res,'Confirm the upfront payment before fulfillment',409);
+  if(next==='shipped'&&!order.shipment?.trackingNumber)return fail(res,'Add a tracking number before shipping',422);
+  if(next==='delivered'&&order.status!=='shipped')return fail(res,'Order must be shipped before delivery',422);
+  order.status=next;
+  if(next==='shipped')order.shipment.shippedAt=new Date();
+  if(next==='delivered')order.shipment.deliveredAt=new Date();
+  await order.save();
+  return ok(res,{order});
+}
+
+
+export async function updatePaymentStatus(req,res){
+  const {shippingFeePaid,depositPaid,paymentStatus}=req.body;
+  const allowed=['pending_verification','shipping_fee_paid','deposit_paid','paid','cod_due'];
+  if(!allowed.includes(paymentStatus))return fail(res,'Invalid payment status',422);
+  const patch={paymentStatus};
+  if(shippingFeePaid!==undefined)patch.shippingFeePaid=Boolean(shippingFeePaid);
+  if(depositPaid!==undefined)patch.depositPaid=Boolean(depositPaid);
+  if(paymentStatus==='deposit_paid'){
+    patch.depositPaid=true;
+    patch.status='confirmed';
+  }
+  if(paymentStatus==='shipping_fee_paid'){
+    patch.shippingFeePaid=shippingFeePaid===undefined?true:Boolean(shippingFeePaid);
+    patch.status='pending';
+  }
+  if(paymentStatus==='paid')patch.status='confirmed';
+  const order=await Order.findByIdAndUpdate(req.params.id,patch,{new:true,runValidators:true});
+  return order?ok(res,{order},'Payment status updated'):fail(res,'Order not found',404);
+}
+
+
 export async function updateShipment(req,res){const {carrier,trackingNumber,trackingUrl}=req.body;const order=await Order.findByIdAndUpdate(req.params.id,{'shipment.carrier':carrier||'البريد المصري','shipment.trackingNumber':trackingNumber,'shipment.trackingUrl':trackingUrl},{new:true,runValidators:true});return order?ok(res,{order},'Shipment updated'):fail(res,'Order not found',404)}
 export async function users(req,res){return ok(res,{users:await User.find().sort('-createdAt')})}
 export async function updateUser(req,res){const safe={};for(const key of ['name','phone','role','isActive'])if(req.body[key]!==undefined)safe[key]=req.body[key];return ok(res,{user:await User.findByIdAndUpdate(req.params.id,safe,{new:true,runValidators:true})})}
@@ -57,5 +143,5 @@ export async function deleteUser(req,res){return ok(res,{user:await User.findByI
 export async function sendMessage(req,res){if(!req.body.name||!req.body.email||!req.body.message)return fail(res,'Name, email and message are required',422);return ok(res,{message:await Message.create(req.body)},'Message received',201)}
 export async function messages(req,res){return ok(res,{messages:await Message.find().sort('-createdAt')})}
 export async function updateMessage(req,res){return ok(res,{message:await Message.findByIdAndUpdate(req.params.id,req.body,{new:true})})}
-export async function stats(req,res){const [totalProducts,totalOrders,totalUsers,pendingOrders,revenue]=await Promise.all([Product.countDocuments({isActive:true}),Order.countDocuments(),User.countDocuments(),Order.countDocuments({status:{$in:['awaiting_shipping_fee','pending']}}),Order.aggregate([{$match:{status:{$nin:['cancelled','awaiting_shipping_fee']}}},{$group:{_id:null,total:{$sum:'$totalPrice'}}}])]);return ok(res,{totalProducts,totalOrders,totalUsers,pendingOrders,totalRevenue:revenue[0]?.total||0})}
+export async function stats(req,res){const [totalProducts,totalOrders,totalUsers,pendingOrders,revenue]=await Promise.all([Product.countDocuments({isActive:true}),Order.countDocuments(),User.countDocuments(),Order.countDocuments({status:{$in:['awaiting_shipping_fee','awaiting_deposit','pending']}}),Order.aggregate([{$match:{status:{$nin:['cancelled','awaiting_shipping_fee','awaiting_deposit']}}},{$group:{_id:null,total:{$sum:'$totalPrice'}}}])]);return ok(res,{totalProducts,totalOrders,totalUsers,pendingOrders,totalRevenue:revenue[0]?.total||0})}
 export async function downloadReceipt(req,res){const order=await Order.findById(req.params.id);if(!order?.paymentReceipt)return fail(res,'Receipt not found',404);const file=path.join(process.cwd(),order.paymentReceipt.replace(/^\/?uploads[\\/]receipts[\\/]*/,'uploads/receipts/'));return res.sendFile(file)}

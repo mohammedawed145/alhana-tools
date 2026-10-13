@@ -2,7 +2,7 @@ import {useState} from 'react';
 import {ArrowLeft,Check,Clock3,Package,Search,Truck,XCircle} from 'lucide-react';
 import {orderService} from './services/api';
 
-const steps=[
+const legacySteps=[
   {key:'awaiting_shipping_fee',label:'في انتظار تأكيد رسوم الشحن'},
   {key:'pending',label:'تم تأكيد رسوم الشحن'},
   {key:'confirmed',label:'تم تأكيد الطلب'},
@@ -10,7 +10,14 @@ const steps=[
   {key:'shipped',label:'تم شحن الطلب'},
   {key:'delivered',label:'تم التسليم'}
 ];
-const statusNames={cancelled:'تم إلغاء الطلب'};
+const depositSteps=[
+  {key:'awaiting_deposit',label:'في انتظار تأكيد الدفعة المقدمة'},
+  {key:'confirmed',label:'تم تأكيد الدفعة المقدمة والطلب'},
+  {key:'processing',label:'جارٍ تجهيز الطلب'},
+  {key:'shipped',label:'تم شحن الطلب'},
+  {key:'delivered',label:'تم التسليم'}
+];
+const statusNames={awaiting_deposit:'في انتظار تأكيد الدفعة المقدمة',cancelled:'تم إلغاء الطلب'};
 function previousOrderId(){try{return JSON.parse(localStorage.getItem('oddatak-last-order')||'null')?._id||''}catch{return ''}}
 function safeTrackingUrl(value){try{const url=new URL(value);return ['https:','http:'].includes(url.protocol)?url.href:''}catch{return ''}}
 
@@ -23,6 +30,7 @@ export default function TrackOrder({Footer}){
     event.preventDefault();setLoading(true);setError('');setOrder(null);
     try{const response=await orderService.track({orderId:form.orderId.trim(),phone:form.phone.trim()});setOrder(response.data?.data?.order||null);if(!response.data?.data?.order)setError('لم يتم العثور على طلب مطابق. تحقق من رقم الطلب ورقم الهاتف.')}catch{setError('لم يتم العثور على طلب مطابق. تحقق من رقم الطلب ورقم الهاتف.')}finally{setLoading(false)}
   };
+  const steps=order?.depositFlow?depositSteps:legacySteps;
   const activeIndex=order?steps.findIndex(step=>step.key===order.status):-1;
   return <>
     <main className="inner-page tracking-page">

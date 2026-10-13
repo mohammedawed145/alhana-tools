@@ -17,6 +17,25 @@ test('orders support prepaid shipping, governorate and discounted prices',()=>{
   assert.match(controller,/p\.discountPrice\?\?p\.price/);
 });
 
+test('new orders require a product-price deposit and leave postage to the post office',()=>{
+  assert.match(model,/depositAmount/);
+  assert.match(model,/depositPaymentMethod/);
+  assert.match(controller,/ORDER_DEPOSIT_AMOUNT/);
+  assert.match(controller,/depositBreakdown\?\.shippingFee\?\?legacyShippingFee/);
+  assert.match(controller,/calculateDepositBreakdown\(subtotal,ORDER_DEPOSIT_AMOUNT\)/);
+  assert.match(controller,/awaiting_deposit/);
+});
+
+test('order creation captures consent and attempts a WhatsApp alert without making it mandatory',()=>{
+  const whatsapp=fs.readFileSync(new URL('../services/whatsapp.js',import.meta.url),'utf8');
+  assert.match(controller,/req\.body\.contactConsent!==true/);
+  assert.match(controller,/sendNewOrderAlert\(order\)/);
+  assert.match(model,/whatsappNotificationStatus/);
+  assert.match(whatsapp,/WHATSAPP_ACCESS_TOKEN/);
+  assert.match(whatsapp,/WHATSAPP_PHONE_NUMBER_ID/);
+  assert.match(whatsapp,/WHATSAPP_NOTIFICATION_TO/);
+});
+
 test('receipt upload is protected for the authenticated order owner',()=>{
   assert.match(routes,/payment-receipt.*protect.*receiptUpload/);
   assert.match(controller,/order\.user\.equals\(req\.user\._id\)/);
