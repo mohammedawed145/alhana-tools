@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const model=fs.readFileSync(new URL('../models/catalog.js',import.meta.url),'utf8');
 const controller=fs.readFileSync(new URL('../controllers/operationsController.js',import.meta.url),'utf8');
+const catalog=fs.readFileSync(new URL('../controllers/catalogController.js',import.meta.url),'utf8');
 const routes=fs.readFileSync(new URL('../routes/index.js',import.meta.url),'utf8');
 
 test('orders support prepaid shipping, governorate and discounted prices',()=>{
@@ -14,6 +15,25 @@ test('orders support prepaid shipping, governorate and discounted prices',()=>{
   assert.match(model,/vodafone_cash/);
   assert.match(controller,/SHIPPING_FEE/);
   assert.match(controller,/p\.discountPrice\?\?p\.price/);
+});
+
+test('new orders require a product-price deposit and leave postage to the post office',()=>{
+  assert.match(model,/depositAmount/);
+  assert.match(model,/depositPaymentMethod/);
+  assert.match(controller,/ORDER_DEPOSIT_AMOUNT/);
+  assert.match(controller,/depositBreakdown\?\.shippingFee\?\?legacyShippingFee/);
+  assert.match(controller,/calculateDepositBreakdown\(subtotal,ORDER_DEPOSIT_AMOUNT\)/);
+  assert.match(controller,/awaiting_deposit/);
+});
+
+test('order creation captures consent and attempts a WhatsApp alert without making it mandatory',()=>{
+  const whatsapp=fs.readFileSync(new URL('../services/whatsapp.js',import.meta.url),'utf8');
+  assert.match(controller,/req\.body\.contactConsent!==true/);
+  assert.match(controller,/sendNewOrderAlert\(order\)/);
+  assert.match(model,/whatsappNotificationStatus/);
+  assert.match(whatsapp,/WHATSAPP_ACCESS_TOKEN/);
+  assert.match(whatsapp,/WHATSAPP_PHONE_NUMBER_ID/);
+  assert.match(whatsapp,/WHATSAPP_NOTIFICATION_TO/);
 });
 
 test('receipt upload is protected for the authenticated order owner',()=>{
@@ -31,4 +51,27 @@ test('admin order controls remain protected',()=>{
   assert.match(routes,/payment-status/);
   assert.match(routes,/shipment/);
   assert.match(routes,/\.\.\.guarded/);
+});
+
+test('product pagination and sorting are bounded and allowlisted',()=>{
+  assert.match(catalog,/Math\.min\(parsedLimit,100\)/);
+  assert.match(catalog,/allowedSorts/);
+  assert.match(catalog,/safePage/);
+});
+
+test('featured products endpoint falls back to active latest products when no featured items exist',()=>{
+  assert.match(catalog,/export async function featuredProducts/);
+  assert.match(catalog,/Product\.countDocuments\(featuredFilter\)/);
+  assert.match(catalog,/const filter=featuredTotal\?featuredFilter:\{isActive:true\}/);
+  assert.match(routes,/r\.get\('\/products\/featured',c\.featuredProducts\)/);
+});
+
+test('authentication routes link to an exported password-change handler',async()=>{
+  const auth=await import('../controllers/authController.js');
+  assert.equal(typeof auth.changePassword,'function');
+  await import('../routes/index.js');
+});
+
+test('public product detail does not expose inactive products',()=>{
+  assert.match(catalog,/findOne\(\{_id:req\.params\.id,isActive:true\}\)/);
 });
