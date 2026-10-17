@@ -1,5 +1,6 @@
 import {Product,Category} from '../models/catalog.js';
 import {ok,fail} from '../middleware/core.js';
+import {parseProductSpecifications} from '../services/productSpecifications.js';
 
 const slugify=value=>String(value||'').toLowerCase().trim().replace(/[^\w\s-]/g,'').replace(/[\s_-]+/g,'-').replace(/^-+|-+$/g,'');
 async function uniqueSlug(Model,value,excludeId){const base=slugify(value)||`item-${Date.now()}`;let candidate=base;let suffix=2;while(await Model.exists(excludeId?{slug:candidate,_id:{$ne:excludeId}}:{slug:candidate}))candidate=`${base}-${suffix++}`;return candidate;}
@@ -48,8 +49,8 @@ export async function featuredProducts(req,res){
 }
 
 export async function getProduct(req,res){const p=await Product.findOne({_id:req.params.id,isActive:true}).populate('category');return p?ok(res,{product:p}):fail(res,'Product not found',404)}
-export async function createProduct(req,res){const data={...req.body,slug:await uniqueSlug(Product,req.body.slug||req.body.name)};if(req.files?.images?.length)data.images=imageData(req.files.images);if(req.files?.thumbnail?.length)data.thumbnail=imageData(req.files.thumbnail)[0];return ok(res,{product:await Product.create(data)},'Product created',201)}
-export async function updateProduct(req,res){const data={...req.body};if(data.name||data.slug)data.slug=await uniqueSlug(Product,data.slug||data.name,req.params.id);if(req.files?.images?.length)data.images=imageData(req.files.images);if(req.files?.thumbnail?.length)data.thumbnail=imageData(req.files.thumbnail)[0];const p=await Product.findByIdAndUpdate(req.params.id,data,{new:true,runValidators:true});return p?ok(res,{product:p}):fail(res,'Product not found',404)}
+export async function createProduct(req,res){const parsed=parseProductSpecifications(req.body.specifications);if(!parsed.valid)return fail(res,parsed.message,400);const data={...req.body,slug:await uniqueSlug(Product,req.body.slug||req.body.name)};if(!parsed.omitted)data.specifications=parsed.value;if(req.files?.images?.length)data.images=imageData(req.files.images);if(req.files?.thumbnail?.length)data.thumbnail=imageData(req.files.thumbnail)[0];return ok(res,{product:await Product.create(data)},'Product created',201)}
+export async function updateProduct(req,res){const parsed=parseProductSpecifications(req.body.specifications);if(!parsed.valid)return fail(res,parsed.message,400);const data={...req.body};if(!parsed.omitted)data.specifications=parsed.value;if(data.name||data.slug)data.slug=await uniqueSlug(Product,data.slug||data.name,req.params.id);if(req.files?.images?.length)data.images=imageData(req.files.images);if(req.files?.thumbnail?.length)data.thumbnail=imageData(req.files.thumbnail)[0];const p=await Product.findByIdAndUpdate(req.params.id,data,{new:true,runValidators:true});return p?ok(res,{product:p},'Product updated'):fail(res,'Product not found',404)}
 export async function deleteProduct(req,res){const p=await Product.findByIdAndUpdate(req.params.id,{isActive:false},{new:true});return p?ok(res,null,'Product deleted'):fail(res,'Product not found',404)}
 export async function listCategories(req,res){return ok(res,{categories:await Category.find({isActive:true}).sort('name')})}
 export async function getCategory(req,res){const category=await Category.findById(req.params.id);return category?ok(res,{category}):fail(res,'Category not found',404)}
